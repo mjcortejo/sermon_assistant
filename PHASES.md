@@ -38,20 +38,22 @@ Review this file anytime to see what is done, what was verified, and what is nex
   - `media/transcripts/` — JSON transcripts
   - `models/` — Whisper weights (downloaded on first transcribe)
   - `db/` — reserved for Phase 2 SQLite
-- GPU/CUDA/Metal auto-detect is still Phase 4. Whisper currently runs **CPU + int8**.
+- GPU/CUDA auto-detect is on for **faster-whisper**. This machine’s GTX 1070 uses CUDA + int8, with CPU int8 if CUDA is unavailable. LLM GPU offload is still later.
 
 ### API (all local)
 
 | Method | Path | Purpose |
 | --- | --- | --- |
-| GET | `/health` | Process is up |
+| GET | `/health` | Process is up; includes Whisper `device` / `compute_type` / GPU name |
 | POST | `/media/download` | yt-dlp YouTube / public Facebook Live → `downloads/` |
+| POST | `/media/download/stream` | Same download, streamed as SSE progress for the import bar |
 | GET | `/media/info` | Metadata only (no download) |
 | POST | `/media/upload` | Multipart file upload → `downloads/` |
 | POST | `/media/ingest-path` | Copy an existing local file into `downloads/` |
 | GET | `/media/probe` | Duration / codec via FFmpeg |
 | POST | `/media/trim` | Lossless clip (`-c copy`) → `trims/` |
 | POST | `/media/transcribe` | faster-whisper + timestamps → JSON in `transcripts/` |
+| POST | `/media/transcribe/stream` | Same job, streamed as SSE cues for the live study panel |
 
 ### Visual inspect (2026-09-20)
 
@@ -108,9 +110,9 @@ Smoke tests:
 
 | # | Item | Status |
 | --- | --- | --- |
-| 2.1 | llama-cpp-python inference pipeline (quantized GGUF, e.g. Llama-3-8B-Instruct) | Code done; package did not build on this machine |
+| 2.1 | Local LLM inference (Ollama if running, otherwise llama-cpp GGUF) | Ollama wired to existing local models; GGUF fallback still blocked on this Python 3.14 machine |
 | 2.2 | Sermon system prompts → structured JSON (theme, scriptures, takeaways, summary) | Done |
-| 2.3 | SQLite persistence for sermons, generated notes, and chat history | Done |
+| 2.3 | SQLite persistence for projects, generated notes, user notes, and chat history | Done |
 | 2.4 | Chat endpoint that retains transcript + notes in context | Done |
 
 ### What landed
@@ -118,19 +120,15 @@ Smoke tests:
 - `POST /notes/generate` — transcript → `{main_theme, scriptures, takeaways, summary}` JSON, stored in SQLite
 - `GET /notes/{sermon_id}` and `PUT /notes/{sermon_id}/user` — generated notes plus the user's own notes
 - `POST /chat` and `GET /chat/{sermon_id}` — Q&A with transcript + notes + history in context
-- `GET /notes/model` — whether the GGUF file is on disk (does not load it)
+- `GET /notes/model` — Ollama tags when the local server is up, otherwise whether a GGUF file is on disk
+- Prefers **Ollama** at `http://127.0.0.1:11434` with `llama3.2:latest` (override `SERMON_OLLAMA_MODEL` / `SERMON_OLLAMA_HOST`)
 - Long transcripts are chunked then merged so a ~8k context window can still cover a full sermon
-- Default model file: `backend/data/models/Meta-Llama-3-8B-Instruct-Q4_K_M.gguf` (override with `SERMON_LLM_MODEL`)
-- Missing model returns **503** instead of crashing. First-run download stays Phase 4.
+- GGUF fallback: `backend/data/models/Meta-Llama-3-8B-Instruct-Q4_K_M.gguf` (`SERMON_LLM_MODEL`)
+- Missing backend returns **503** instead of crashing. First-run download stays Phase 4.
 
 ### Blocker
 
-`llama-cpp-python` has no Python 3.14 wheel here and failed to compile (`nmake` / C++ toolchain missing). SQLAlchemy is installed. Inference will work after either:
-
-- installing Visual Studio Build Tools and rebuilding `llama-cpp-python`, or
-- using Python 3.11/3.12 (recommended for Phase 4 packaging) which has prebuilt wheels
-
-Place the GGUF in `backend/data/models/` before generating notes. Do not bundle the 4.9GB file in git.
+`llama-cpp-python` still has no Python 3.14 wheel here. That path is optional now: if Ollama is running with a local model (this machine has `llama3.2:latest`, `llama3.2:1b`, and `qwen3.5:9b`), notes and chat use that instead.
 
 Visual inspect of this phase waits for Phase 3 UI.
 
@@ -146,15 +144,22 @@ Visual inspect of this phase waits for Phase 3 UI.
 | 3.2 | Trimming studio (HTML5 player + dual-handle range slider) | Done |
 | 3.3 | Split-screen workspace (video/transcript vs notes/chat/user notes) | Done |
 | 3.4 | Visual inspect + small UI tests (no download/trim/transcribe/LLM) | Done |
+| 3.5 | Project library: each video is a saved study you can reopen | Done |
+| 3.5a | Persistent left sidebar for projects (ChatGPT-style) | Done |
+| 3.6 | Live transcript cues in the study workspace while Whisper is still running | Done |
+| 3.7 | Import progress bar for URL download and file upload | Done |
 
 ### What landed
 
 - Vite + React UI at `http://localhost:5173` (`npm run dev`)
 - Tauri 2 shell in `src-tauri/` — Rust is not installed on this machine, so the desktop wrapper is not runnable yet
 - Import: URL + download, file dropzone, continue to trim
+- **Import progress:** URL downloads stream yt-dlp percent/speed/ETA; local file drops show upload percent
 - Trim studio: HTML5 player, dual-handle range, trim (disabled until a video is loaded)
 - Study: video + transcript on the left; generated notes, personal notes, chat on the right
 - FastAPI `/media/file` streams local library files into the player
+- **Projects:** each imported video is saved in SQLite. A left sidebar lists studies so you can open, continue, or start a new one from any step.
+- **Live transcript:** `POST /media/transcribe/stream` sends SSE cues as faster-whisper produces them. The study panel appends them immediately so you can take notes and chat against the text so far.
 - Processing buttons (Download, Trim selection, Transcribe, Generate notes, Send) are present but were **not** executed in this pass
 
 ### Visual inspect + small tests (2026-09-20)
@@ -185,4 +190,4 @@ Run UI: `npm run dev` (frontend) and `python -m uvicorn backend.main:app --host 
 | 4.1 | PyInstaller FastAPI backend | Not started |
 | 4.2 | First-run model download (Whisper + GGUF) with progress bar | Not started |
 | 4.3 | Inno Setup (Windows) / DMG (macOS) bundling Tauri + backend + FFmpeg | Not started |
-| 4.4 | Hardware detection (CUDA/Metal) with CPU fallback | Not started |
+| 4.4 | Hardware detection (CUDA/Metal) with CPU fallback | Whisper CUDA auto-detect done; LLM GPU offload not started |
