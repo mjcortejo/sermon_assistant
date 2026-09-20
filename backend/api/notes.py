@@ -9,6 +9,7 @@ from backend.db.session import get_db
 from backend.models.schemas import GenerateNotesRequest, NotesResponse, SermonNotes, UserNotesRequest
 from backend.services.llm import LlmUnavailableError, ModelNotFoundError, ensure_llm, model_status
 from backend.services.notes_engine import generate_structured_notes
+from backend.services.ocr import format_screen_texts
 
 router = APIRouter(prefix="/notes", tags=["Notes"])
 
@@ -60,7 +61,10 @@ def generate_notes(request: GenerateNotesRequest, db: Session = Depends(get_db))
         if not (transcript or "").strip():
             raise ValueError("Transcript is empty.")
 
-        structured = generate_structured_notes(transcript)
+        structured = generate_structured_notes(
+            transcript,
+            screen_text=format_screen_texts(project.captures),
+        )
         notes = project.notes
         if notes is None:
             notes = GeneratedNotes(project_id=project.id)

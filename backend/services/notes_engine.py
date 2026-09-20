@@ -117,16 +117,24 @@ def _parse_notes_json(raw: str) -> dict[str, Any]:
     }
 
 
-def generate_structured_notes(transcript: str) -> dict[str, Any]:
+def generate_structured_notes(transcript: str, screen_text: str = "") -> dict[str, Any]:
     chunks = _chunk_text(transcript)
     if not chunks:
         raise ValueError("Transcript is empty.")
+
+    screen_block = ""
+    if (screen_text or "").strip():
+        screen_block = (
+            "\n\nOn-screen text captured from the video (OCR). Treat this as part of "
+            "the sermon materials, especially for scriptures and slide points:\n"
+            f"{screen_text.strip()}\n"
+        )
 
     if len(chunks) == 1:
         raw = chat_completion(
             [
                 {"role": "system", "content": NOTES_SYSTEM_PROMPT},
-                {"role": "user", "content": f"Sermon transcript:\n\n{chunks[0]}"},
+                {"role": "user", "content": f"Sermon transcript:\n\n{chunks[0]}{screen_block}"},
             ],
             json_mode=True,
             max_tokens=1200,
@@ -145,7 +153,7 @@ def generate_structured_notes(transcript: str) -> dict[str, Any]:
                     "role": "user",
                     "content": (
                         f"This is chunk {index} of {len(chunks)} from one sermon.\n\n"
-                        f"{chunk}"
+                        f"{chunk}{screen_block if index == 1 else ''}"
                     ),
                 },
             ],

@@ -6,8 +6,9 @@ from backend.core.config import LLM_N_CTX
 from backend.services.llm import chat_completion
 
 CHAT_SYSTEM_PROMPT = """You are a study partner helping a church member understand a sermon.
-Answer from the provided transcript and generated notes. If the answer is not in that
-material, say you do not find it in this sermon instead of guessing.
+Answer from the provided transcript, generated notes, and any on-screen text
+captured from slides. If the answer is not in that material, say you do not find
+it in this sermon instead of guessing.
 
 Be concise, pastoral in tone, and quote short phrases from the transcript when helpful.
 Do not invent scripture references.
@@ -31,6 +32,7 @@ def answer_question(
     user_notes: str,
     history: list[dict[str, str]],
     question: str,
+    screen_text: str = "",
 ) -> str:
     history_budget = 4000
     packed_history = []
@@ -49,6 +51,7 @@ def answer_question(
     context = (
         f"Generated notes JSON:\n{notes_json}\n\n"
         f"User's personal notes:\n{user_notes or '(none)'}\n\n"
+        f"On-screen text from the video:\n{screen_text or '(none)'}\n\n"
         f"Sermon transcript:\n{_trim_to_budget(transcript, transcript_chars)}"
     )
     messages = [

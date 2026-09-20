@@ -5,7 +5,7 @@ from backend.db.models import ChatMessage, Project
 from backend.db.serialize import touch
 from backend.db.session import get_db
 from backend.models.schemas import ChatMessageOut, ChatRequest, ChatResponse
-from backend.services.chat_engine import answer_question
+from backend.services.ocr import format_screen_texts
 from backend.services.llm import LlmUnavailableError, ModelNotFoundError
 
 router = APIRouter(prefix="/chat", tags=["Chat"])
@@ -45,6 +45,7 @@ def chat(request: ChatRequest, db: Session = Depends(get_db)):
             transcript=project.transcript,
             notes_json=(project.notes.raw_json if project.notes else "{}"),
             user_notes=project.user_notes or "",
+            screen_text=format_screen_texts(project.captures),
             history=history,
             question=question,
         )

@@ -39,6 +39,11 @@ class Project(Base):
         cascade="all, delete-orphan",
         order_by="ChatMessage.id",
     )
+    captures: Mapped[list["FrameCapture"]] = relationship(
+        back_populates="project",
+        cascade="all, delete-orphan",
+        order_by="FrameCapture.timestamp",
+    )
 
 
 class GeneratedNotes(Base):
@@ -67,3 +72,17 @@ class ChatMessage(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
     project: Mapped[Project] = relationship(back_populates="messages")
+
+
+class FrameCapture(Base):
+    __tablename__ = "frame_captures"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id"))
+    timestamp: Mapped[float] = mapped_column(Float, default=0.0)
+    text: Mapped[str] = mapped_column(Text, default="")
+    confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
+    frame_path: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+    project: Mapped[Project] = relationship(back_populates="captures")

@@ -120,6 +120,31 @@ class UserNotesRequest(BaseModel):
     user_notes: str
 
 
+class OcrRequest(BaseModel):
+    file_path: str
+    timestamp: TimeValue = 0
+    project_id: Optional[int] = None
+
+
+class FrameCaptureOut(BaseModel):
+    id: Optional[int] = None
+    timestamp: float
+    text: str
+    confidence: Optional[float] = None
+    frame_path: Optional[str] = None
+
+
+class OcrResponse(BaseModel):
+    status: str = "success"
+    timestamp: float
+    text: str
+    lines: list[str]
+    confidence: Optional[float] = None
+    frame_path: str
+    capture: Optional[FrameCaptureOut] = None
+    captures: list[FrameCaptureOut] = []
+
+
 class ChatRequest(BaseModel):
     project_id: int
     message: str
@@ -192,6 +217,7 @@ class ProjectDetail(ProjectSummary):
     user_notes: str = ""
     notes: Optional[SermonNotes] = None
     chat: list[ChatMessageOut] = []
+    captures: list[FrameCaptureOut] = []
 
 
 class ProjectListResponse(BaseModel):

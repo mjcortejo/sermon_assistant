@@ -3,17 +3,24 @@ import json
 import threading
 from pathlib import Path
 
-from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse, StreamingResponse
+from sqlalchemy.orm import Session
 
 from backend.core.config import DOWNLOADS_DIR, MEDIA_DIR, ensure_data_dirs
 from backend.core.utils import safe_filename, unique_path
+from backend.db.models import FrameCapture, Project
+from backend.db.serialize import capture_payload, captures_payload, touch
+from backend.db.session import get_db
 from backend.models.schemas import (
     DownloadRequest,
     DownloadResponse,
     InfoResponse,
     IngestPathRequest,
     IngestResponse,
+    OcrRequest,
+    OcrResponse,
+    FrameCaptureOut,
     ProbeResponse,
     TranscribeRequest,
     TranscribeResponse,
@@ -28,6 +35,7 @@ from backend.services.downloader import (
     ingest_local_file_async,
     iter_download_events,
 )
+from backend.services.ocr import capture_on_screen_text_async
 from backend.services.transcriber import ALLOWED_MODEL_SIZES, iter_transcript_events, transcribe_audio_async
 from backend.services.video_editor import probe_video_async, trim_video_async
 
@@ -190,6 +198,53 @@ async def transcribe_media_stream(request: TranscribeRequest):
     if request.model_size not in ALLOWED_MODEL_SIZES:
         raise HTTPException(status_code=400, detail=f"Unsupported Whisper model size: {request.model_size}")
     return _event_stream(lambda: iter_transcript_events(request.file_path, request.model_size))
+
+
+@router.post("/ocr", response_model=OcrResponse)
+async def ocr_media_frame(request: OcrRequest, db: Session = Depends(get_db)):
+    """Grab the video frame at timestamp and read on-screen text with RapidOCR."""
+    try:
+        result = await capture_on_screen_text_async(request.file_path, request.timestamp)
+        capture_out = None
+        captures: list[FrameCaptureOut] = []
+        if request.project_id is not None:
+            project = db.get(Project, request.project_id)
+            if project is None:
+                raise FileNotFoundError(f"Project {request.project_id} was not found.")
+            row = FrameCapture(
+                project_id=project.id,
+                timestamp=result["timestamp"],
+                text=result["text"],
+                confidence=result.get("confidence"),
+                frame_path=result["frame_path"],
+            )
+            db.add(row)
+            touch(project)
+            db.commit()
+            db.refresh(row)
+            db.refresh(project)
+            capture_out = FrameCaptureOut(**capture_payload(row))
+            captures = [FrameCaptureOut(**item) for item in captures_payload(project)]
+        else:
+            capture_out = FrameCaptureOut(
+                timestamp=result["timestamp"],
+                text=result["text"],
+                confidence=result.get("confidence"),
+                frame_path=result["frame_path"],
+            )
+            captures = [capture_out]
+        return OcrResponse(
+            timestamp=result["timestamp"],
+            text=result["text"],
+            lines=result["lines"],
+            confidence=result.get("confidence"),
+            frame_path=result["frame_path"],
+            capture=capture_out,
+            captures=captures,
+        )
+    except Exception as exc:
+        db.rollback()
+        raise _http_error(exc) from exc
 
 
 @router.get("/file")

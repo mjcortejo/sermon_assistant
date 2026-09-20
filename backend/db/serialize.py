@@ -8,6 +8,20 @@ def touch(project: Project) -> None:
     project.updated_at = datetime.now()
 
 
+def capture_payload(capture) -> dict:
+    return {
+        "id": capture.id,
+        "timestamp": capture.timestamp,
+        "text": capture.text or "",
+        "confidence": capture.confidence,
+        "frame_path": capture.frame_path,
+    }
+
+
+def captures_payload(project: Project) -> list[dict]:
+    return [capture_payload(item) for item in (project.captures or [])]
+
+
 def parse_transcript(project: Project) -> dict | None:
     if project.transcript_json:
         try:
@@ -67,4 +81,5 @@ def project_detail(project: Project) -> dict:
         "user_notes": project.user_notes or "",
         "notes": notes_payload(project),
         "chat": chat_payload(project),
+        "captures": captures_payload(project),
     }
