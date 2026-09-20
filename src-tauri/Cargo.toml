@@ -1,0 +1,15 @@
+[package]
+name = "sermon-assistant"
+version = "0.1.0"
+description = "Local-first sermon study assistant"
+edition = "2021"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+
+[[bin]]
+name = "sermon-assistant"
+path = "src/main.rs"

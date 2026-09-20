@@ -1,6 +1,8 @@
 from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi.responses import FileResponse
+from pathlib import Path
 
-from backend.core.config import DOWNLOADS_DIR, ensure_data_dirs
+from backend.core.config import DOWNLOADS_DIR, MEDIA_DIR, ensure_data_dirs
 from backend.core.utils import safe_filename, unique_path
 from backend.models.schemas import (
     DownloadRequest,
@@ -121,5 +123,18 @@ async def transcribe_media(request: TranscribeRequest):
             data=TranscriptData(**result),
             transcript_path=transcript_path,
         )
+    except Exception as exc:
+        raise _http_error(exc) from exc
+
+
+@router.get("/file")
+def stream_media(path: str):
+    """Stream a file from the local media library so the HTML5 player can play it."""
+    try:
+        resolved = Path(path).expanduser().resolve()
+        root = MEDIA_DIR.resolve()
+        if not resolved.is_file() or not resolved.is_relative_to(root):
+            raise FileNotFoundError("File is not in the local media library.")
+        return FileResponse(resolved)
     except Exception as exc:
         raise _http_error(exc) from exc
