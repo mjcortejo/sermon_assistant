@@ -104,6 +104,17 @@ export function sessionFromProject(project: ProjectDetail): Session {
   };
 }
 
+export function transcriptResumeAt(
+  transcript: TranscriptData | null | undefined,
+  duration = 0,
+): number | null {
+  const segments = transcript?.segments || [];
+  if (!segments.length) return null;
+  const last = segments[segments.length - 1]?.end ?? 0;
+  if (duration > 0 && last >= duration - 0.4) return null;
+  return last > 0 ? last : null;
+}
+
 export function mediaUrl(filePath: string): string {
   if (!filePath) return "";
   return `/media/file?path=${encodeURIComponent(filePath)}`;
@@ -119,6 +130,28 @@ export function formatTime(seconds: number): string {
     return `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
   }
   return `${m}:${String(s).padStart(2, "0")}`;
+}
+
+/** Parse m:ss, h:mm:ss, or a raw second count. Returns null if the text is not a time. */
+export function parseClockTime(value: string): number | null {
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  if (/^\d+(\.\d+)?$/.test(trimmed)) {
+    const seconds = Number(trimmed);
+    return Number.isFinite(seconds) && seconds >= 0 ? seconds : null;
+  }
+  const parts = trimmed.split(":");
+  if (parts.length < 2 || parts.length > 3) return null;
+  const nums = parts.map((part) => Number(part));
+  if (nums.some((part) => !Number.isFinite(part) || part < 0)) return null;
+  if (parts.length === 2) {
+    const [minutes, seconds] = nums;
+    if (seconds >= 60) return null;
+    return minutes * 60 + seconds;
+  }
+  const [hours, minutes, seconds] = nums;
+  if (minutes >= 60 || seconds >= 60) return null;
+  return hours * 3600 + minutes * 60 + seconds;
 }
 
 export type ImportProgress = {

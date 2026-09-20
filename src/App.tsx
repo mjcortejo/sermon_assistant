@@ -2,20 +2,23 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   captureFrameText,
   createProject,
+  deleteAllProjects,
   deleteProject,
   generateNotes,
   getHealth,
   getProject,
   listProjects,
+  probeVideo,
   saveUserNotes,
   sendChat,
+  stopTranscription,
   transcribeVideoLive,
   trimVideo,
   updateProject,
 } from "./api";
 import { Stepper } from "./components/Stepper";
 import { ProjectSidebar } from "./components/ProjectSidebar";
-import { emptySession, sessionFromProject, type ProjectSummary, type Session, type Step } from "./types";
+import { emptySession, sessionFromProject, transcriptResumeAt, type ProjectSummary, type Session, type Step, type TranscriptData } from "./types";
 import { ImportView } from "./views/ImportView";
 import { TrimStudio } from "./views/TrimStudio";
 import { Workspace } from "./views/Workspace";
@@ -36,6 +39,22 @@ function healthCopy(whisperDevice: string, whisperGpu: string, llmModel: string)
   else if (whisperDevice === "cpu") parts.push("CPU");
   if (llmModel) parts.push(llmShortName(llmModel));
   return parts.join(" · ");
+}
+
+function mergeTranscript(prior: TranscriptData | null | undefined, incoming: TranscriptData): TranscriptData {
+  const existing = prior?.segments || [];
+  if (!existing.length) return incoming;
+  const cutoff = existing[existing.length - 1]?.end ?? 0;
+  const extra = (incoming.segments || []).filter((item) => item.start >= cutoff - 0.05);
+  const segments = [...existing, ...extra];
+  return {
+    language: incoming.language ?? prior?.language,
+    full_text: segments
+      .map((item) => item.text)
+      .filter(Boolean)
+      .join(" "),
+    segments,
+  };
 }
 
 export default function App() {
@@ -165,9 +184,14 @@ export default function App() {
   }
 
   async function removeProject(id: number) {
+    const project = projects.find((item) => item.id === id);
+    const title = project?.title || "this project";
+    if (!window.confirm(`Delete “${title}”? This cannot be undone.`)) return;
     try {
       await deleteProject(id);
       if (session.projectId === id) {
+        transcribeAbort.current?.abort();
+        setTranscribing(false);
         setSession(emptySession);
         setStep("import");
       }
@@ -177,17 +201,48 @@ export default function App() {
     }
   }
 
+  async function removeAllProjects() {
+    if (!projects.length) return;
+    if (!window.confirm(`Delete all ${projects.length} projects? This cannot be undone.`)) return;
+    try {
+      transcribeAbort.current?.abort();
+      setTranscribing(false);
+      await deleteAllProjects();
+      setSession(emptySession);
+      setStep("import");
+      await refreshProjects();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not delete projects.");
+    }
+  }
+
   async function runTrim() {
-    if (!session.videoPath) {
+    const source = session.sourcePath || session.videoPath;
+    if (!source) {
       setError("Import a video before trimming.");
       return;
     }
     setError("");
     setBusy("Trimming…");
     try {
-      const result = await trimVideo(session.videoPath, session.trimStart, session.trimEnd || session.duration);
-      patch({ videoPath: result.output_path });
-      await persist({ videoPath: result.output_path }, "study");
+      const sourceInfo = await probeVideo(source);
+      const sourceDuration = sourceInfo.duration || session.duration;
+      const start = session.trimStart || 0;
+      const end = session.trimEnd || sourceDuration;
+      const isFullClip = start <= 0.15 && end >= sourceDuration - 0.15;
+      let videoPath = source;
+      let clipDuration = sourceDuration;
+      if (!isFullClip) {
+        const result = await trimVideo(source, start, end);
+        videoPath = result.output_path;
+        const clipInfo = await probeVideo(videoPath);
+        clipDuration = clipInfo.duration || Math.max(end - start, 0);
+      }
+      patch({ videoPath, duration: clipDuration, trimStart: start, trimEnd: end });
+      await persist(
+        { videoPath, duration: clipDuration, sourcePath: session.sourcePath || source, trimStart: start, trimEnd: end },
+        "study",
+      );
       setBusy("");
       setStep("study");
     } catch (err) {
@@ -196,36 +251,71 @@ export default function App() {
     }
   }
 
-  async function runTranscribe() {
+  async function runTranscribe(resume = false) {
     if (!session.videoPath) return;
     transcribeAbort.current?.abort();
     const controller = new AbortController();
     transcribeAbort.current = controller;
+    const prior = resume ? sessionRef.current.transcript : { full_text: "", segments: [] as TranscriptData["segments"] };
+    const startTime = resume ? transcriptResumeAt(prior, sessionRef.current.duration) || 0 : 0;
     setError("");
     setTranscribing(true);
-    setBusy(transcribeBusy);
-    patch({ transcript: { full_text: "", segments: [] } });
+    setBusy(resume ? "Continuing transcription from the last cue…" : transcribeBusy);
+    if (!resume) {
+      patch({ transcript: { full_text: "", segments: [] } });
+    }
     try {
       const result = await transcribeVideoLive(
         session.videoPath,
         (data, done) => {
-          patch({ transcript: data });
+          const merged = resume ? mergeTranscript(prior, data) : data;
+          patch({ transcript: merged });
           if (done) return;
-          persistTranscriptSoon(data);
+          persistTranscriptSoon(merged);
         },
         "base",
         controller.signal,
+        startTime,
       );
       window.clearTimeout(persistTimer.current);
-      patch({ transcript: result.data });
-      await persist({ transcript: result.data }, "study");
+      const merged = resume ? mergeTranscript(prior, result.data) : result.data;
+      patch({ transcript: merged });
+      await persist({ transcript: merged }, "study");
       setBusy("");
       setTranscribing(false);
     } catch (err) {
-      if (controller.signal.aborted) return;
+      if (controller.signal.aborted) {
+        window.clearTimeout(persistTimer.current);
+        setTranscribing(false);
+        setBusy("");
+        try {
+          await persist({ transcript: sessionRef.current.transcript }, "study");
+        } catch {
+          // Keep the cues already on screen.
+        }
+        return;
+      }
       setBusy("");
       setTranscribing(false);
       setError(err instanceof Error ? err.message : "Transcription failed.");
+    }
+  }
+
+  async function stopTranscribe() {
+    setBusy("Stopping transcription…");
+    try {
+      await stopTranscription();
+    } catch {
+      // Still abort the client stream if the stop route is unreachable.
+    }
+    transcribeAbort.current?.abort();
+    window.clearTimeout(persistTimer.current);
+    setTranscribing(false);
+    setBusy("");
+    try {
+      await persist({ transcript: sessionRef.current.transcript }, "study");
+    } catch {
+      // Keep the partial transcript locally.
     }
   }
 
@@ -330,6 +420,7 @@ export default function App() {
         currentId={session.projectId}
         onOpen={(id) => void openProject(id)}
         onDelete={(id) => void removeProject(id)}
+        onDeleteAll={() => void removeAllProjects()}
         onNew={startNewProject}
       />
       <div className="app-main">
@@ -367,7 +458,7 @@ export default function App() {
             error={error}
             onChange={patch}
             onTrim={() => void runTrim()}
-            onContinue={() => void goTo("study")}
+            onContinue={() => void runTrim()}
           />
         ) : null}
         {step === "study" ? (
@@ -377,7 +468,9 @@ export default function App() {
             error={error}
             onUserNotes={(value) => void persistUserNotes(value)}
             onGenerate={() => void runNotes()}
-            onTranscribe={() => void runTranscribe()}
+            onTranscribe={() => void runTranscribe(false)}
+            onStopTranscribe={() => void stopTranscribe()}
+            onContinueTranscribe={() => void runTranscribe(true)}
             onChat={(message) => void runChat(message)}
             onCaptureFrame={(time) => void runCaptureFrame(time)}
             transcribing={transcribing}

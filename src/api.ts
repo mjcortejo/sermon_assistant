@@ -204,11 +204,12 @@ export async function transcribeVideoLive(
   onUpdate: (data: TranscriptData, done: boolean) => void,
   modelSize = "base",
   signal?: AbortSignal,
+  startTime = 0,
 ): Promise<{ data: TranscriptData; transcript_path?: string }> {
   const response = await fetch("/media/transcribe/stream", {
     method: "POST",
     headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
-    body: JSON.stringify({ file_path: filePath, model_size: modelSize }),
+    body: JSON.stringify({ file_path: filePath, model_size: modelSize, start_time: startTime }),
     signal,
   });
   if (!response.ok) {
@@ -245,6 +246,10 @@ export async function transcribeVideoLive(
   }
 
   return { data: latest, transcript_path: transcriptPath };
+}
+
+export function stopTranscription() {
+  return request<{ status: string }>("/media/transcribe/stop", { method: "POST" });
 }
 
 export function captureFrameText(filePath: string, timestamp: number, projectId?: number | null) {
@@ -330,4 +335,8 @@ export function updateProject(id: number, body: Record<string, unknown>) {
 
 export function deleteProject(id: number) {
   return request<{ status: string; id: number }>(`/projects/${id}`, { method: "DELETE" });
+}
+
+export function deleteAllProjects() {
+  return request<{ status: string; deleted: number }>("/projects", { method: "DELETE" });
 }

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
-import { formatTime, mediaUrl, type Session } from "../types";
+import { formatTime, mediaUrl, transcriptResumeAt, type Session } from "../types";
 
 type Props = {
   session: Session;
@@ -11,6 +11,8 @@ type Props = {
   onUserNotes: (value: string) => void;
   onGenerate: () => void;
   onTranscribe: () => void;
+  onStopTranscribe: () => void;
+  onContinueTranscribe: () => void;
   onChat: (message: string) => void;
   onCaptureFrame: (timestamp: number) => void;
 };
@@ -24,6 +26,8 @@ export function Workspace({
   onUserNotes,
   onGenerate,
   onTranscribe,
+  onStopTranscribe,
+  onContinueTranscribe,
   onChat,
   onCaptureFrame,
 }: Props) {
@@ -33,6 +37,7 @@ export function Workspace({
   const videoRef = useRef<HTMLVideoElement>(null);
   const cuesRef = useRef<HTMLOListElement>(null);
   const segments = session.transcript?.segments || [];
+  const canContinue = !transcribing && transcriptResumeAt(session.transcript, session.duration) != null;
 
   function send(event: FormEvent) {
     event.preventDefault();
@@ -52,7 +57,7 @@ export function Workspace({
       <div className="workspace-left">
         <div className="player-shell compact">
           {src ? (
-            <video ref={videoRef} src={src} controls playsInline data-testid="study-player" />
+            <video key={src} ref={videoRef} src={src} controls playsInline data-testid="study-player" />
           ) : (
             <div className="player-empty">No trimmed clip yet.</div>
           )}
@@ -76,14 +81,36 @@ export function Workspace({
         <div className="transcript-card">
           <div className="card-head">
             <h3>Transcript {transcribing ? <span className="live-pill">Live</span> : null}</h3>
-            <button
-              type="button"
-              className="btn small"
-              onClick={onTranscribe}
-              disabled={!session.videoPath || transcribing}
-            >
-              {transcribing ? "Transcribing…" : session.transcript?.full_text ? "Re-transcribe" : "Transcribe"}
-            </button>
+            <div className="transcript-actions">
+              {transcribing ? (
+                <button type="button" className="btn small" data-testid="stop-transcribe" onClick={onStopTranscribe}>
+                  Stop
+                </button>
+              ) : (
+                <>
+                  {canContinue ? (
+                    <button
+                      type="button"
+                      className="btn primary small"
+                      data-testid="continue-transcribe"
+                      onClick={onContinueTranscribe}
+                      disabled={!session.videoPath}
+                    >
+                      Continue
+                    </button>
+                  ) : null}
+                  <button
+                    type="button"
+                    className="btn small"
+                    data-testid="start-transcribe"
+                    onClick={onTranscribe}
+                    disabled={!session.videoPath}
+                  >
+                    {session.transcript?.full_text ? "Re-transcribe" : "Transcribe"}
+                  </button>
+                </>
+              )}
+            </div>
           </div>
           {segments.length ? (
             <ol className="cues" ref={cuesRef} data-testid="transcript-cues">

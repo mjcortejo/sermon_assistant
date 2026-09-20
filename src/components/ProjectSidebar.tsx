@@ -5,6 +5,7 @@ type Props = {
   currentId: number | null;
   onOpen: (id: number) => void;
   onDelete: (id: number) => void;
+  onDeleteAll: () => void;
   onNew: () => void;
 };
 
@@ -21,7 +22,7 @@ function projectMeta(project: ProjectSummary): string {
   return project.duration ? `${status} · ${formatTime(project.duration)}` : status;
 }
 
-export function ProjectSidebar({ projects, currentId, onOpen, onDelete, onNew }: Props) {
+export function ProjectSidebar({ projects, currentId, onOpen, onDelete, onDeleteAll, onNew }: Props) {
   return (
     <aside className="sidebar" data-testid="project-sidebar">
       <div className="sidebar-brand">
@@ -54,6 +55,11 @@ export function ProjectSidebar({ projects, currentId, onOpen, onDelete, onNew }:
       ) : (
         <p className="muted sidebar-empty">Saved studies will appear here.</p>
       )}
+      {projects.length ? (
+        <button type="button" className="btn small sidebar-delete-all" data-testid="delete-all-projects" onClick={onDeleteAll}>
+          Delete all projects
+        </button>
+      ) : null}
     </aside>
   );
 }
