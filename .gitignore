@@ -144,3 +144,5 @@ $RECYCLE.BIN/
 *.swo
 *~
 .cursor/mcp.json
+CACHEDIR.TAG
+pyvenv.cfg
