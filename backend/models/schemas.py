@@ -92,3 +92,54 @@ class TranscribeResponse(BaseModel):
 class ErrorResponse(BaseModel):
     detail: str
     extra: Optional[dict[str, Any]] = None
+
+
+class GenerateNotesRequest(BaseModel):
+    transcript: str
+    title: Optional[str] = None
+    transcript_path: Optional[str] = None
+    sermon_id: Optional[int] = None
+
+
+class SermonNotes(BaseModel):
+    main_theme: str
+    scriptures: list[str]
+    takeaways: list[str]
+    summary: str
+    user_notes: str = ""
+
+
+class NotesResponse(BaseModel):
+    status: str = "success"
+    sermon_id: int
+    title: Optional[str] = None
+    notes: SermonNotes
+
+
+class UserNotesRequest(BaseModel):
+    user_notes: str
+
+
+class ChatRequest(BaseModel):
+    sermon_id: int
+    message: str
+
+
+class ChatMessageOut(BaseModel):
+    id: int
+    role: str
+    content: str
+
+
+class ChatResponse(BaseModel):
+    status: str = "success"
+    sermon_id: int
+    reply: str
+    history: list[ChatMessageOut]
+
+
+class ModelStatusResponse(BaseModel):
+    path: str
+    exists: bool
+    loaded: bool
+    n_ctx: int

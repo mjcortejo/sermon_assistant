@@ -3,13 +3,15 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from backend.api import media
+from backend.api import chat, media, notes
 from backend.core.config import ensure_data_dirs
+from backend.db.session import init_db
 
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     ensure_data_dirs()
+    init_db()
     yield
 
 
@@ -29,6 +31,8 @@ app.add_middleware(
 )
 
 app.include_router(media.router)
+app.include_router(notes.router)
+app.include_router(chat.router)
 
 
 @app.get("/")

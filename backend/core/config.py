@@ -1,4 +1,5 @@
 from pathlib import Path
+import os
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = BASE_DIR / "data"
@@ -10,8 +11,18 @@ TRANSCRIPTS_DIR = MEDIA_DIR / "transcripts"
 
 MODELS_DIR = DATA_DIR / "models"
 DB_DIR = DATA_DIR / "db"
+DATABASE_PATH = DB_DIR / "sermon_assistant.db"
+DATABASE_URL = f"sqlite:///{DATABASE_PATH.as_posix()}"
+
+LLM_MODEL_NAME = os.environ.get("SERMON_LLM_MODEL", "Meta-Llama-3-8B-Instruct-Q4_K_M.gguf")
+LLM_N_CTX = int(os.environ.get("SERMON_LLM_N_CTX", "8192"))
+LLM_N_THREADS = os.environ.get("SERMON_LLM_N_THREADS")
 
 MEDIA_SUBDIRS = (DOWNLOADS_DIR, TRIMS_DIR, TRANSCRIPTS_DIR)
+
+
+def llm_model_path() -> Path:
+    return MODELS_DIR / LLM_MODEL_NAME
 
 
 def ensure_data_dirs() -> None:
