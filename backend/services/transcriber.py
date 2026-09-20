@@ -1,54 +1,91 @@
-import os
 import asyncio
-from typing import List, Dict, Any
+import json
+from pathlib import Path
+from typing import Any, Optional
+
 from faster_whisper import WhisperModel
 
-# Global model instance so it isn't reloaded for every request
-_model = None
+from backend.core.config import MODELS_DIR, TRANSCRIPTS_DIR, ensure_data_dirs
+from backend.core.utils import unique_path
 
-def get_model(model_size: str = "base", device: str = "cpu", compute_type: str = "int8") -> WhisperModel:
+_model: Optional[WhisperModel] = None
+_model_key: Optional[tuple[str, str, str]] = None
+
+DEFAULT_DEVICE = "cpu"
+DEFAULT_COMPUTE_TYPE = "int8"
+
+
+def get_model(
+    model_size: str = "base",
+    device: str = DEFAULT_DEVICE,
+    compute_type: str = DEFAULT_COMPUTE_TYPE,
+) -> WhisperModel:
     """
-    Lazy loads the Whisper model.
-    By default, uses CPU with int8 quantization.
-    For GPU support, this could dynamically check if CUDA is available and use 'cuda' with 'float16'.
+    Lazy-load faster-whisper. Reloads if size/device/compute_type change.
+    Phase 1 uses CPU + int8. GPU selection is Phase 4.
     """
-    global _model
-    if _model is None:
-        print(f"Loading Whisper model '{model_size}' on {device}...")
-        _model = WhisperModel(model_size, device=device, compute_type=compute_type)
+    global _model, _model_key
+    key = (model_size, device, compute_type)
+    if _model is None or _model_key != key:
+        _model = WhisperModel(
+            model_size,
+            device=device,
+            compute_type=compute_type,
+            download_root=str(MODELS_DIR),
+        )
+        _model_key = key
     return _model
 
-def transcribe_audio(file_path: str, model_size: str = "base") -> Dict[str, Any]:
+
+def transcribe_audio(file_path: str, model_size: str = "base") -> dict[str, Any]:
     """
-    Transcribes the audio file and returns text with timestamps.
+    Transcribe a local video/audio file.
+    Returns full text plus timestamped segments, and writes JSON under transcripts/.
     """
-    if not os.path.exists(file_path):
-        raise FileNotFoundError(f"Audio file not found: {file_path}")
+    ensure_data_dirs()
+    source = Path(file_path)
+    if not source.is_file():
+        raise FileNotFoundError(f"Audio/video file not found: {file_path}")
+
+    allowed_sizes = {"tiny", "tiny.en", "base", "base.en", "small", "small.en", "medium", "large-v2", "large-v3"}
+    if model_size not in allowed_sizes:
+        raise ValueError(f"Unsupported Whisper model size: {model_size}")
 
     model = get_model(model_size=model_size)
-    
-    # Transcribe the audio
-    segments, info = model.transcribe(file_path, beam_size=5)
+    segments_iter, info = model.transcribe(str(source), beam_size=5)
+    duration = float(info.duration) if getattr(info, "duration", None) is not None else None
 
     segments_data = []
-    full_text = ""
-    for segment in segments:
+    text_parts: list[str] = []
+    for segment in segments_iter:
+        piece = (segment.text or "").strip()
+        start = max(0.0, float(segment.start))
+        end = float(segment.end)
+        if duration is not None:
+            end = min(end, duration)
+        if end < start:
+            end = start
         segments_data.append({
-            "start": segment.start,
-            "end": segment.end,
-            "text": segment.text
+            "start": start,
+            "end": end,
+            "text": piece,
         })
-        full_text += segment.text + " "
+        if piece:
+            text_parts.append(piece)
 
-    return {
+    result: dict[str, Any] = {
         "language": info.language,
-        "language_probability": info.language_probability,
-        "full_text": full_text.strip(),
-        "segments": segments_data
+        "language_probability": float(info.language_probability) if info.language_probability is not None else None,
+        "duration": duration,
+        "full_text": " ".join(text_parts).strip(),
+        "segments": segments_data,
     }
 
-async def transcribe_audio_async(file_path: str, model_size: str = "base") -> Dict[str, Any]:
-    """
-    Async wrapper for transcribe_audio to avoid blocking the event loop.
-    """
+    transcript_path = unique_path(TRANSCRIPTS_DIR, f"{source.stem}.json")
+    transcript_path.write_text(json.dumps(result, indent=2, ensure_ascii=False), encoding="utf-8")
+    result["transcript_path"] = str(transcript_path.resolve())
+    return result
+
+
+async def transcribe_audio_async(file_path: str, model_size: str = "base") -> dict[str, Any]:
     return await asyncio.to_thread(transcribe_audio, file_path, model_size)
