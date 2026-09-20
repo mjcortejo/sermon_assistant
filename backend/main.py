@@ -3,9 +3,11 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from backend.api import chat, media, notes
+from backend.api import chat, media, notes, projects
 from backend.core.config import ensure_data_dirs
+from backend.core.hardware import detect_whisper_runtime
 from backend.db.session import init_db
+from backend.services.llm import model_status as llm_status
 
 
 @asynccontextmanager
@@ -31,6 +33,7 @@ app.add_middleware(
 )
 
 app.include_router(media.router)
+app.include_router(projects.router)
 app.include_router(notes.router)
 app.include_router(chat.router)
 
@@ -42,7 +45,21 @@ def read_root():
 
 @app.get("/health")
 def health():
-    return {"status": "ok"}
+    runtime = detect_whisper_runtime()
+    llm = llm_status()
+    return {
+        "status": "ok",
+        "whisper": {
+            "device": runtime.device,
+            "compute_type": runtime.compute_type,
+            "gpu": runtime.gpu_name,
+        },
+        "llm": {
+            "backend": llm.get("backend"),
+            "model": llm.get("model"),
+            "available": bool(llm.get("exists")),
+        },
+    }
 
 
 if __name__ == "__main__":

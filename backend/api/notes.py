@@ -3,15 +3,11 @@ import json
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
-from backend.db.models import GeneratedNotes, Sermon
+from backend.db.models import GeneratedNotes, Project
+from backend.db.serialize import notes_payload, touch
 from backend.db.session import get_db
-from backend.models.schemas import (
-    GenerateNotesRequest,
-    NotesResponse,
-    SermonNotes,
-    UserNotesRequest,
-)
-from backend.services.llm import LlmUnavailableError, ModelNotFoundError, get_llama, model_status
+from backend.models.schemas import GenerateNotesRequest, NotesResponse, SermonNotes, UserNotesRequest
+from backend.services.llm import LlmUnavailableError, ModelNotFoundError, ensure_llm, model_status
 from backend.services.notes_engine import generate_structured_notes
 
 router = APIRouter(prefix="/notes", tags=["Notes"])
@@ -27,17 +23,12 @@ def _http_error(exc: Exception) -> HTTPException:
     return HTTPException(status_code=500, detail=str(exc))
 
 
-def _to_response(sermon: Sermon, notes: GeneratedNotes) -> NotesResponse:
+def _to_response(project: Project, notes: GeneratedNotes) -> NotesResponse:
+    payload = notes_payload(project) or {}
     return NotesResponse(
-        sermon_id=sermon.id,
-        title=sermon.title,
-        notes=SermonNotes(
-            main_theme=notes.main_theme,
-            scriptures=json.loads(notes.scriptures_json or "[]"),
-            takeaways=json.loads(notes.takeaways_json or "[]"),
-            summary=notes.summary,
-            user_notes=notes.user_notes or "",
-        ),
+        project_id=project.id,
+        title=project.title,
+        notes=SermonNotes(**payload),
     )
 
 
@@ -49,27 +40,30 @@ def get_model_status():
 @router.post("/generate", response_model=NotesResponse)
 def generate_notes(request: GenerateNotesRequest, db: Session = Depends(get_db)):
     try:
-        get_llama()
-        sermon = None
-        if request.sermon_id is not None:
-            sermon = db.get(Sermon, request.sermon_id)
-            if sermon is None:
-                raise FileNotFoundError(f"Sermon {request.sermon_id} was not found.")
-            transcript = request.transcript or sermon.transcript
+        ensure_llm()
+        if request.project_id is not None:
+            project = db.get(Project, request.project_id)
+            if project is None:
+                raise FileNotFoundError(f"Project {request.project_id} was not found.")
+            transcript = request.transcript or project.transcript
         else:
-            transcript = request.transcript
-            sermon = Sermon(
-                title=request.title,
+            transcript = request.transcript or ""
+            project = Project(
+                title=request.title or "Untitled sermon",
                 transcript=transcript,
                 transcript_path=request.transcript_path,
+                current_step="study",
             )
-            db.add(sermon)
+            db.add(project)
             db.flush()
 
+        if not (transcript or "").strip():
+            raise ValueError("Transcript is empty.")
+
         structured = generate_structured_notes(transcript)
-        notes = sermon.notes
+        notes = project.notes
         if notes is None:
-            notes = GeneratedNotes(sermon_id=sermon.id)
+            notes = GeneratedNotes(project_id=project.id)
             db.add(notes)
 
         notes.main_theme = structured["main_theme"]
@@ -77,29 +71,45 @@ def generate_notes(request: GenerateNotesRequest, db: Session = Depends(get_db))
         notes.takeaways_json = json.dumps(structured["takeaways"], ensure_ascii=False)
         notes.summary = structured["summary"]
         notes.raw_json = structured["raw_json"]
+        if not project.transcript:
+            project.transcript = transcript
+        touch(project)
         db.commit()
-        db.refresh(sermon)
+        db.refresh(project)
         db.refresh(notes)
-        return _to_response(sermon, notes)
+        return _to_response(project, notes)
     except Exception as exc:
         db.rollback()
         raise _http_error(exc) from exc
 
 
-@router.get("/{sermon_id}", response_model=NotesResponse)
-def get_notes(sermon_id: int, db: Session = Depends(get_db)):
-    sermon = db.get(Sermon, sermon_id)
-    if sermon is None or sermon.notes is None:
-        raise HTTPException(status_code=404, detail=f"Notes for sermon {sermon_id} were not found.")
-    return _to_response(sermon, sermon.notes)
+@router.get("/{project_id}", response_model=NotesResponse)
+def get_notes(project_id: int, db: Session = Depends(get_db)):
+    project = db.get(Project, project_id)
+    if project is None or project.notes is None:
+        raise HTTPException(status_code=404, detail=f"Notes for project {project_id} were not found.")
+    return _to_response(project, project.notes)
 
 
-@router.put("/{sermon_id}/user", response_model=NotesResponse)
-def update_user_notes(sermon_id: int, request: UserNotesRequest, db: Session = Depends(get_db)):
-    sermon = db.get(Sermon, sermon_id)
-    if sermon is None or sermon.notes is None:
-        raise HTTPException(status_code=404, detail=f"Notes for sermon {sermon_id} were not found.")
-    sermon.notes.user_notes = request.user_notes
+@router.put("/{project_id}/user", response_model=NotesResponse)
+def update_user_notes(project_id: int, request: UserNotesRequest, db: Session = Depends(get_db)):
+    project = db.get(Project, project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail=f"Project {project_id} was not found.")
+    project.user_notes = request.user_notes
+    touch(project)
     db.commit()
-    db.refresh(sermon.notes)
-    return _to_response(sermon, sermon.notes)
+    if project.notes is None:
+        return NotesResponse(
+            project_id=project.id,
+            title=project.title,
+            notes=SermonNotes(
+                main_theme="",
+                scriptures=[],
+                takeaways=[],
+                summary="",
+                user_notes=project.user_notes,
+            ),
+        )
+    db.refresh(project)
+    return _to_response(project, project.notes)
