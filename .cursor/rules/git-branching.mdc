@@ -1,0 +1,40 @@
+---
+description: Always implement work on a feature branch and merge to master only after it is complete and tested.
+alwaysApply: true
+---
+
+# Git branching
+
+For every prompt that changes the repo, do the work on a branch. Do not commit feature work directly to `master`.
+
+## Start
+
+1. Check `git status` and the current branch before editing.
+2. If you are on `master` (or about to start a new feature/fix), create and switch to a branch from current `master`:
+   - `feature/<short-topic>` for new behavior
+   - `fix/<short-topic>` for bug fixes
+3. Keep one concern per branch. Do not pile unrelated features onto an existing branch.
+
+```text
+git checkout master
+git checkout -b feature/project-sidebar
+```
+
+## Finish
+
+Merge back to `master` only when **all** of these are true:
+
+- The requested feature or fix is fully implemented
+- It has been tested (tests, API checks, and/or UI verification as the work requires)
+- The working tree for that feature is ready to commit
+
+Then:
+
+```text
+git checkout master
+git merge --no-ff feature/project-sidebar
+```
+
+Always use `--no-ff` when merging into `master` so the feature branch remains a visible merge commit. Do not merge half-finished work. Never force-push `master`. Do not delete or push branches unless the user asks.
+
+If the user only asked a question and no code changes are needed, do not create a branch.
