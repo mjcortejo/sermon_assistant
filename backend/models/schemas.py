@@ -67,6 +67,7 @@ class TrimResponse(BaseModel):
 class TranscribeRequest(BaseModel):
     file_path: str
     model_size: str = Field(default="base", description="faster-whisper model size, e.g. tiny, base, small")
+    start_time: float = Field(default=0, description="Resume transcription from this timestamp (seconds)")
 
 
 class TranscriptSegment(BaseModel):

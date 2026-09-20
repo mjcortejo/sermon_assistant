@@ -36,7 +36,12 @@ from backend.services.downloader import (
     iter_download_events,
 )
 from backend.services.ocr import capture_on_screen_text_async
-from backend.services.transcriber import ALLOWED_MODEL_SIZES, iter_transcript_events, transcribe_audio_async
+from backend.services.transcriber import (
+    ALLOWED_MODEL_SIZES,
+    iter_transcript_events,
+    request_transcribe_stop,
+    transcribe_audio_async,
+)
 from backend.services.video_editor import probe_video_async, trim_video_async
 
 router = APIRouter(prefix="/media", tags=["Media"])
@@ -179,7 +184,7 @@ async def trim_media(request: TrimRequest):
 @router.post("/transcribe", response_model=TranscribeResponse)
 async def transcribe_media(request: TranscribeRequest):
     try:
-        result = await transcribe_audio_async(request.file_path, request.model_size)
+        result = await transcribe_audio_async(request.file_path, request.model_size, request.start_time)
         transcript_path = result.pop("transcript_path")
         return TranscribeResponse(
             data=TranscriptData(**result),
@@ -197,7 +202,16 @@ async def transcribe_media_stream(request: TranscribeRequest):
         raise HTTPException(status_code=404, detail=f"Audio/video file not found: {request.file_path}")
     if request.model_size not in ALLOWED_MODEL_SIZES:
         raise HTTPException(status_code=400, detail=f"Unsupported Whisper model size: {request.model_size}")
-    return _event_stream(lambda: iter_transcript_events(request.file_path, request.model_size))
+    return _event_stream(
+        lambda: iter_transcript_events(request.file_path, request.model_size, request.start_time)
+    )
+
+
+@router.post("/transcribe/stop")
+def stop_transcribe_media():
+    """Stop the in-flight transcription after the current cue."""
+    request_transcribe_stop()
+    return {"status": "success"}
 
 
 @router.post("/ocr", response_model=OcrResponse)

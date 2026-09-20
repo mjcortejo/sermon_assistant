@@ -21,7 +21,7 @@ from backend.main import app
 client = TestClient(app)
 
 
-def fake_events(file_path: str, model_size: str = "base"):
+def fake_events(file_path: str, model_size: str = "base", start_time: float = 0.0):
     yield {
         "type": "info",
         "data": {"language": "en", "duration": 2.0, "full_text": "", "segments": []},
@@ -70,7 +70,14 @@ def test_transcribe_stream_emits_cues():
     assert "event: done" in body
 
 
+def test_transcribe_stop_route():
+    response = client.post("/media/transcribe/stop")
+    assert response.status_code == 200, response.text
+    assert response.json()["status"] == "success"
+
+
 if __name__ == "__main__":
     test_stream_missing_file()
     test_transcribe_stream_emits_cues()
+    test_transcribe_stop_route()
     print("Transcript stream checks passed (Whisper not invoked).")
