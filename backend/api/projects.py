@@ -94,6 +94,20 @@ def update_project(project_id: int, request: ProjectUpdate, db: Session = Depend
         raise _http_error(exc) from exc
 
 
+@router.delete("")
+def delete_all_projects(db: Session = Depends(get_db)):
+    try:
+        rows = db.scalars(select(Project)).all()
+        count = len(rows)
+        for row in rows:
+            db.delete(row)
+        db.commit()
+        return {"status": "success", "deleted": count}
+    except Exception as exc:
+        db.rollback()
+        raise _http_error(exc) from exc
+
+
 @router.delete("/{project_id}")
 def delete_project(project_id: int, db: Session = Depends(get_db)):
     try:
