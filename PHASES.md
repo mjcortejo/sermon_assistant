@@ -6,8 +6,8 @@ Last updated: 2026-09-20
 | Phase | Name | Status |
 | --- | --- | --- |
 | 1 | The Media Pipeline | **Complete** |
-| 2 | The LLM & Note-Generation Engine | Not started — waiting for approval |
-| 3 | The User Interface | Not started |
+| 2 | The LLM & Note-Generation Engine | **Code complete** — GGUF runtime not installed on this Python 3.14 machine |
+| 3 | The User Interface | **Complete** (Vite React; Tauri needs Rust to compile the desktop window) |
 | 4 | Packaging (Single-Click Install) | Not started |
 
 Review this file anytime to see what is done, what was verified, and what is next. Code for a new phase does not start until the phase checklist is approved.
@@ -108,12 +108,31 @@ Smoke tests:
 
 | # | Item | Status |
 | --- | --- | --- |
-| 2.1 | llama-cpp-python inference pipeline (quantized GGUF, e.g. Llama-3-8B-Instruct) | Not started |
-| 2.2 | Sermon system prompts → structured JSON (theme, scriptures, takeaways, summary) | Not started |
-| 2.3 | SQLite persistence for sermons, generated notes, and chat history | Not started |
-| 2.4 | Chat endpoint that retains transcript + notes in context | Not started |
+| 2.1 | llama-cpp-python inference pipeline (quantized GGUF, e.g. Llama-3-8B-Instruct) | Code done; package did not build on this machine |
+| 2.2 | Sermon system prompts → structured JSON (theme, scriptures, takeaways, summary) | Done |
+| 2.3 | SQLite persistence for sermons, generated notes, and chat history | Done |
+| 2.4 | Chat endpoint that retains transcript + notes in context | Done |
 
-**Blocked on:** your approval of a detailed Phase 2 checklist (same gate as Phase 1).
+### What landed
+
+- `POST /notes/generate` — transcript → `{main_theme, scriptures, takeaways, summary}` JSON, stored in SQLite
+- `GET /notes/{sermon_id}` and `PUT /notes/{sermon_id}/user` — generated notes plus the user's own notes
+- `POST /chat` and `GET /chat/{sermon_id}` — Q&A with transcript + notes + history in context
+- `GET /notes/model` — whether the GGUF file is on disk (does not load it)
+- Long transcripts are chunked then merged so a ~8k context window can still cover a full sermon
+- Default model file: `backend/data/models/Meta-Llama-3-8B-Instruct-Q4_K_M.gguf` (override with `SERMON_LLM_MODEL`)
+- Missing model returns **503** instead of crashing. First-run download stays Phase 4.
+
+### Blocker
+
+`llama-cpp-python` has no Python 3.14 wheel here and failed to compile (`nmake` / C++ toolchain missing). SQLAlchemy is installed. Inference will work after either:
+
+- installing Visual Studio Build Tools and rebuilding `llama-cpp-python`, or
+- using Python 3.11/3.12 (recommended for Phase 4 packaging) which has prebuilt wheels
+
+Place the GGUF in `backend/data/models/` before generating notes. Do not bundle the 4.9GB file in git.
+
+Visual inspect of this phase waits for Phase 3 UI.
 
 ---
 
@@ -123,9 +142,37 @@ Smoke tests:
 
 | # | Item | Status |
 | --- | --- | --- |
-| 3.1 | Import view (URL + local file dropzone) | Not started |
-| 3.2 | Trimming studio (HTML5 player + dual-handle range slider) | Not started |
-| 3.3 | Split-screen workspace (video/transcript vs notes/chat/user notes) | Not started |
+| 3.1 | Import view (URL + local file dropzone) | Done |
+| 3.2 | Trimming studio (HTML5 player + dual-handle range slider) | Done |
+| 3.3 | Split-screen workspace (video/transcript vs notes/chat/user notes) | Done |
+| 3.4 | Visual inspect + small UI tests (no download/trim/transcribe/LLM) | Done |
+
+### What landed
+
+- Vite + React UI at `http://localhost:5173` (`npm run dev`)
+- Tauri 2 shell in `src-tauri/` — Rust is not installed on this machine, so the desktop wrapper is not runnable yet
+- Import: URL + download, file dropzone, continue to trim
+- Trim studio: HTML5 player, dual-handle range, trim (disabled until a video is loaded)
+- Study: video + transcript on the left; generated notes, personal notes, chat on the right
+- FastAPI `/media/file` streams local library files into the player
+- Processing buttons (Download, Trim selection, Transcribe, Generate notes, Send) are present but were **not** executed in this pass
+
+### Visual inspect + small tests (2026-09-20)
+
+Playwright against `http://localhost:5173` with the local API up. Did not click Download, Trim selection, Transcribe, Generate notes, or Send.
+
+Looks right:
+- Top bar: Sermon Assistant, steps 1–3, **API ready**
+- Import: URL field, Download, dropzone, Continue to trim
+- Trim: empty-player copy, Start/End, dual sliders, Trim selection **disabled** without a video
+- Study: split layout; Transcribe/Generate notes disabled without a clip/transcript; Send disabled until chat text
+- Typed personal notes and a chat draft; typed a YouTube URL into Import without submitting
+
+Nits:
+- Empty trim studio showed End `0:01` because duration 0 still used a 1s slider max (guard added)
+- Missing favicon 404 (svg icon added)
+
+Run UI: `npm run dev` (frontend) and `python -m uvicorn backend.main:app --host 127.0.0.1 --port 8000` (API).
 
 ---
 
