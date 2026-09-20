@@ -1,0 +1,1 @@
+"""Sermon Assistant backend package."""

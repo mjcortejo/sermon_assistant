@@ -3,3 +3,7 @@ yt-dlp
 faster-whisper
 ffmpeg-python
 pydantic
+llama-cpp-python
+sqlalchemy
+aiosqlite
+httpx
