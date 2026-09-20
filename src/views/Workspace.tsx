@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { formatTime, mediaUrl, type Session } from "../types";
 
@@ -6,6 +6,7 @@ type Props = {
   session: Session;
   busy: string;
   error: string;
+  transcribing: boolean;
   onUserNotes: (value: string) => void;
   onGenerate: () => void;
   onTranscribe: () => void;
@@ -16,6 +17,7 @@ export function Workspace({
   session,
   busy,
   error,
+  transcribing,
   onUserNotes,
   onGenerate,
   onTranscribe,
@@ -24,6 +26,9 @@ export function Workspace({
   const [draft, setDraft] = useState("");
   const src = mediaUrl(session.videoPath);
   const notes = session.notes;
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const cuesRef = useRef<HTMLOListElement>(null);
+  const segments = session.transcript?.segments || [];
 
   function send(event: FormEvent) {
     event.preventDefault();
@@ -33,36 +38,58 @@ export function Workspace({
     onChat(text);
   }
 
+  useEffect(() => {
+    if (!transcribing) return;
+    cuesRef.current?.lastElementChild?.scrollIntoView({ block: "nearest" });
+  }, [segments.length, transcribing]);
+
   return (
     <section className="workspace">
       <div className="workspace-left">
         <div className="player-shell compact">
           {src ? (
-            <video src={src} controls playsInline data-testid="study-player" />
+            <video ref={videoRef} src={src} controls playsInline data-testid="study-player" />
           ) : (
             <div className="player-empty">No trimmed clip yet.</div>
           )}
         </div>
         <div className="transcript-card">
           <div className="card-head">
-            <h3>Transcript</h3>
-            <button type="button" className="btn small" onClick={onTranscribe} disabled={!session.videoPath}>
-              Transcribe
+            <h3>Transcript {transcribing ? <span className="live-pill">Live</span> : null}</h3>
+            <button
+              type="button"
+              className="btn small"
+              onClick={onTranscribe}
+              disabled={!session.videoPath || transcribing}
+            >
+              {transcribing ? "Transcribing…" : session.transcript?.full_text ? "Re-transcribe" : "Transcribe"}
             </button>
           </div>
-          {session.transcript?.segments.length ? (
-            <ol className="cues">
-              {session.transcript.segments.map((segment) => (
-                <li key={`${segment.start}-${segment.end}`}>
-                  <time>{formatTime(segment.start)}</time>
-                  <p>{segment.text}</p>
+          {segments.length ? (
+            <ol className="cues" ref={cuesRef} data-testid="transcript-cues">
+              {segments.map((segment, index) => (
+                <li
+                  key={`${segment.start}-${segment.end}-${index}`}
+                  className={transcribing && index === segments.length - 1 ? "is-live" : undefined}
+                >
+                  <button
+                    type="button"
+                    className="cue"
+                    onClick={() => {
+                      if (videoRef.current) videoRef.current.currentTime = segment.start;
+                    }}
+                  >
+                    <time>{formatTime(segment.start)}</time>
+                    <p>{segment.text}</p>
+                  </button>
                 </li>
               ))}
             </ol>
           ) : (
             <p className="muted" data-testid="transcript-empty">
-              {session.transcript?.full_text ||
-                "Transcript will appear here after transcription. You can still inspect the study layout."}
+              {transcribing
+                ? "Listening… the first cue will appear in a moment. You can already write your own notes."
+                : "Cues appear here as the sermon is transcribed. You can take notes while it runs."}
             </p>
           )}
         </div>
@@ -72,7 +99,7 @@ export function Workspace({
         <div className="notes-card">
           <div className="card-head">
             <h3>Sermon notes</h3>
-            <button type="button" className="btn small" onClick={onGenerate} disabled={!session.transcript}>
+            <button type="button" className="btn small" onClick={onGenerate} disabled={!session.transcript?.full_text}>
               Generate notes
             </button>
           </div>
@@ -94,7 +121,11 @@ export function Workspace({
               <p>{notes.summary}</p>
             </div>
           ) : (
-            <p className="muted">Generated notes will land here after the local LLM runs.</p>
+            <p className="muted">
+              {session.transcript?.full_text
+                ? "You can generate notes from the transcript so far, or keep studying while more cues arrive."
+                : "Generated notes will land here after the local LLM runs."}
+            </p>
           )}
         </div>
 
@@ -119,7 +150,7 @@ export function Workspace({
                 </p>
               ))
             ) : (
-              <p className="muted">Chat stays on this machine and uses the transcript as context.</p>
+              <p className="muted">Chat stays on this machine and uses the transcript as context, including cues that have already landed.</p>
             )}
           </div>
           <form className="chat-form" onSubmit={send}>
