@@ -8,6 +8,7 @@ MEDIA_DIR = DATA_DIR / "media"
 DOWNLOADS_DIR = MEDIA_DIR / "downloads"
 TRIMS_DIR = MEDIA_DIR / "trims"
 TRANSCRIPTS_DIR = MEDIA_DIR / "transcripts"
+FRAMES_DIR = MEDIA_DIR / "frames"
 
 MODELS_DIR = DATA_DIR / "models"
 DB_DIR = DATA_DIR / "db"
@@ -20,7 +21,7 @@ LLM_N_THREADS = os.environ.get("SERMON_LLM_N_THREADS")
 OLLAMA_HOST = os.environ.get("SERMON_OLLAMA_HOST", "http://127.0.0.1:11434").rstrip("/")
 OLLAMA_MODEL = os.environ.get("SERMON_OLLAMA_MODEL", "llama3.2:latest").strip() or "llama3.2:latest"
 
-MEDIA_SUBDIRS = (DOWNLOADS_DIR, TRIMS_DIR, TRANSCRIPTS_DIR)
+MEDIA_SUBDIRS = (DOWNLOADS_DIR, TRIMS_DIR, TRANSCRIPTS_DIR, FRAMES_DIR)
 
 
 def llm_model_path() -> Path:

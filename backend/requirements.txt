@@ -1,6 +1,7 @@
 fastapi[all]
 yt-dlp
 faster-whisper
+rapidocr
 ffmpeg-python
 pydantic
 llama-cpp-python

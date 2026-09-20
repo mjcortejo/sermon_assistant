@@ -5,7 +5,7 @@ from typing import Optional
 
 import ffmpeg
 
-from backend.core.config import TRIMS_DIR, ensure_data_dirs
+from backend.core.config import FRAMES_DIR, TRIMS_DIR, ensure_data_dirs
 from backend.core.utils import TimeValue, ffmpeg_time, safe_filename, time_to_seconds, unique_path
 
 
@@ -112,3 +112,33 @@ async def trim_video_async(
 
 async def probe_video_async(input_path: str) -> dict:
     return await asyncio.to_thread(probe_video, input_path)
+
+
+def extract_frame(
+    input_path: str,
+    timestamp: TimeValue,
+    output_name: Optional[str] = None,
+) -> str:
+    """Grab a single PNG frame at timestamp for OCR."""
+    _assert_ffmpeg()
+    ensure_data_dirs()
+
+    source = Path(input_path)
+    if not source.is_file():
+        raise FileNotFoundError(f"Input file not found: {input_path}")
+
+    seconds = time_to_seconds(timestamp)
+    stem = safe_filename(output_name or f"{source.stem}_{int(seconds * 1000)}ms", fallback="frame")
+    output_path = unique_path(FRAMES_DIR, f"{stem}.png")
+
+    stream = ffmpeg.input(str(source))
+    stream = ffmpeg.output(stream, str(output_path), ss=seconds, vframes=1)
+    try:
+        ffmpeg.run(stream, overwrite_output=True, capture_stdout=True, capture_stderr=True)
+    except ffmpeg.Error as exc:
+        stderr = (exc.stderr or b"").decode("utf-8", errors="replace")
+        raise RuntimeError(f"FFmpeg frame grab failed: {stderr[-2000:]}") from exc
+
+    if not output_path.is_file() or output_path.stat().st_size == 0:
+        raise RuntimeError("FFmpeg reported success but the frame file is missing or empty.")
+    return str(output_path.resolve())
