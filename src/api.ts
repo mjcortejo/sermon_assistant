@@ -1,4 +1,4 @@
-import type { ImportProgress, ProjectDetail, ProjectSummary, SermonNotes, TranscriptData } from "./types";
+import type { FrameCapture, ImportProgress, ProjectDetail, ProjectSummary, SermonNotes, TranscriptData } from "./types";
 
 async function parseError(response: Response): Promise<string> {
   try {
@@ -245,6 +245,26 @@ export async function transcribeVideoLive(
   }
 
   return { data: latest, transcript_path: transcriptPath };
+}
+
+export function captureFrameText(filePath: string, timestamp: number, projectId?: number | null) {
+  return request<{
+    timestamp: number;
+    text: string;
+    lines: string[];
+    confidence?: number | null;
+    frame_path: string;
+    capture?: FrameCapture | null;
+    captures: FrameCapture[];
+  }>("/media/ocr", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      file_path: filePath,
+      timestamp,
+      project_id: projectId ?? undefined,
+    }),
+  });
 }
 
 export function generateNotes(projectId: number, transcript: string, title?: string) {

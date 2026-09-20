@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
+  captureFrameText,
   createProject,
   deleteProject,
   generateNotes,
@@ -48,6 +49,7 @@ export default function App() {
   const [whisperGpu, setWhisperGpu] = useState("");
   const [llmModel, setLlmModel] = useState("");
   const [transcribing, setTranscribing] = useState(false);
+  const [capturing, setCapturing] = useState(false);
   const sessionRef = useRef(session);
   sessionRef.current = session;
   const transcribeBusy =
@@ -262,6 +264,27 @@ export default function App() {
     }
   }
 
+  async function runCaptureFrame(timestamp: number) {
+    if (!session.videoPath) {
+      setError("Import a video before capturing on-screen text.");
+      return;
+    }
+    setError("");
+    setCapturing(true);
+    setBusy("Reading on-screen text…");
+    try {
+      const result = await captureFrameText(session.videoPath, timestamp, session.projectId);
+      patch({ frameCaptures: result.captures || [] });
+      await refreshProjects();
+      setBusy(transcribing ? transcribeBusy : "");
+      setCapturing(false);
+    } catch (err) {
+      setBusy(transcribing ? transcribeBusy : "");
+      setCapturing(false);
+      setError(err instanceof Error ? err.message : "Could not read text from this frame.");
+    }
+  }
+
   async function runChat(message: string) {
     patch({ chatLog: [...session.chatLog, { role: "user", content: message }] });
     if (!session.projectId) {
@@ -356,7 +379,9 @@ export default function App() {
             onGenerate={() => void runNotes()}
             onTranscribe={() => void runTranscribe()}
             onChat={(message) => void runChat(message)}
+            onCaptureFrame={(time) => void runCaptureFrame(time)}
             transcribing={transcribing}
+            capturing={capturing}
           />
         ) : null}
       </main>

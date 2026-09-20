@@ -20,6 +20,14 @@ export type SermonNotes = {
   user_notes: string;
 };
 
+export type FrameCapture = {
+  id?: number | null;
+  timestamp: number;
+  text: string;
+  confidence?: number | null;
+  frame_path?: string | null;
+};
+
 export type ProjectSummary = {
   id: number;
   title: string;
@@ -40,6 +48,7 @@ export type ProjectDetail = ProjectSummary & {
   user_notes: string;
   notes: SermonNotes | null;
   chat: { id: number; role: "user" | "assistant" | string; content: string }[];
+  captures?: FrameCapture[];
 };
 
 export type Session = {
@@ -55,6 +64,7 @@ export type Session = {
   notes: SermonNotes | null;
   userNotes: string;
   chatLog: { role: "user" | "assistant"; content: string }[];
+  frameCaptures: FrameCapture[];
 };
 
 export const emptySession: Session = {
@@ -70,6 +80,7 @@ export const emptySession: Session = {
   notes: null,
   userNotes: "",
   chatLog: [],
+  frameCaptures: [],
 };
 
 export function sessionFromProject(project: ProjectDetail): Session {
@@ -89,6 +100,7 @@ export function sessionFromProject(project: ProjectDetail): Session {
       role: item.role === "assistant" ? "assistant" : "user",
       content: item.content,
     })),
+    frameCaptures: project.captures || [],
   };
 }
 

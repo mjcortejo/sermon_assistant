@@ -7,10 +7,12 @@ type Props = {
   busy: string;
   error: string;
   transcribing: boolean;
+  capturing?: boolean;
   onUserNotes: (value: string) => void;
   onGenerate: () => void;
   onTranscribe: () => void;
   onChat: (message: string) => void;
+  onCaptureFrame: (timestamp: number) => void;
 };
 
 export function Workspace({
@@ -18,10 +20,12 @@ export function Workspace({
   busy,
   error,
   transcribing,
+  capturing = false,
   onUserNotes,
   onGenerate,
   onTranscribe,
   onChat,
+  onCaptureFrame,
 }: Props) {
   const [draft, setDraft] = useState("");
   const src = mediaUrl(session.videoPath);
@@ -52,6 +56,22 @@ export function Workspace({
           ) : (
             <div className="player-empty">No trimmed clip yet.</div>
           )}
+          <div className="player-toolbar">
+            <button
+              type="button"
+              className="btn small"
+              data-testid="capture-frame"
+              onClick={() => {
+                const time = videoRef.current?.currentTime ?? 0;
+                videoRef.current?.pause();
+                onCaptureFrame(time);
+              }}
+              disabled={!session.videoPath || capturing}
+            >
+              {capturing ? "Reading text…" : "Capture on-screen text"}
+            </button>
+            <p className="muted">Pause on a slide or verse, then capture the current frame.</p>
+          </div>
         </div>
         <div className="transcript-card">
           <div className="card-head">
@@ -126,6 +146,29 @@ export function Workspace({
                 ? "You can generate notes from the transcript so far, or keep studying while more cues arrive."
                 : "Generated notes will land here after the local LLM runs."}
             </p>
+          )}
+          {session.frameCaptures.length ? (
+            <div className="screen-texts" data-testid="screen-texts">
+              <h4>On-screen text</h4>
+              <ul>
+                {session.frameCaptures.map((item, index) => (
+                  <li key={item.id ?? `${item.timestamp}-${index}`}>
+                    <button
+                      type="button"
+                      className="cue"
+                      onClick={() => {
+                        if (videoRef.current) videoRef.current.currentTime = item.timestamp;
+                      }}
+                    >
+                      <time>{formatTime(item.timestamp)}</time>
+                      <p>{item.text}</p>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : (
+            <p className="muted">Captured slide and verse text will be listed here and used when you generate notes.</p>
           )}
         </div>
 
