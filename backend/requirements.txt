@@ -2,6 +2,8 @@ fastapi[all]
 yt-dlp
 faster-whisper
 rapidocr
+# Windows GPU Whisper needs CUDA 12 cuBLAS on PATH:
+#   pip install nvidia-cublas-cu12 nvidia-cuda-runtime-cu12
 ffmpeg-python
 pydantic
 llama-cpp-python

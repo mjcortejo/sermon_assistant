@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import os
-import subprocess
+import site
+import sys
 from dataclasses import dataclass
 from functools import lru_cache
+from pathlib import Path
 
 CUDA_COMPUTE_PREFERENCE = (
     "int8",
@@ -16,6 +18,8 @@ CUDA_COMPUTE_PREFERENCE = (
     "float32",
 )
 CPU_COMPUTE_PREFERENCE = ("int8", "int8_float32", "int16", "float32")
+
+_dll_dirs_ready = False
 
 
 @dataclass(frozen=True)
@@ -45,6 +49,8 @@ def _pick_compute(preferred: str | None, supported: set[str], order: tuple[str, 
 
 def _gpu_name() -> str | None:
     try:
+        import subprocess
+
         output = subprocess.check_output(
             ["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"],
             text=True,
@@ -57,14 +63,76 @@ def _gpu_name() -> str | None:
         return None
 
 
+def _nvidia_bin_dirs() -> list[Path]:
+    dirs: list[Path] = []
+    roots: list[Path] = []
+    try:
+        roots.extend(Path(p) for p in site.getsitepackages())
+    except Exception:
+        pass
+    roots.append(Path(sys.prefix) / "Lib" / "site-packages")
+    seen: set[Path] = set()
+    for root in roots:
+        nvidia = root / "nvidia"
+        if not nvidia.is_dir():
+            continue
+        for bin_dir in nvidia.glob("*/bin"):
+            resolved = bin_dir.resolve()
+            if resolved.is_dir() and resolved not in seen:
+                seen.add(resolved)
+                dirs.append(resolved)
+    return dirs
+
+
+def ensure_cuda_dll_dirs() -> None:
+    """Put pip CUDA wheels on the DLL search path (Windows needs this for cublas64_12.dll)."""
+    global _dll_dirs_ready
+    if _dll_dirs_ready:
+        return
+    dirs = _nvidia_bin_dirs()
+    if dirs:
+        os.environ["PATH"] = os.pathsep.join(str(path) for path in dirs) + os.pathsep + os.environ.get("PATH", "")
+        adder = getattr(os, "add_dll_directory", None)
+        if adder is not None:
+            for path in dirs:
+                try:
+                    adder(str(path))
+                except OSError:
+                    pass
+    _dll_dirs_ready = True
+
+
+def cuda_libraries_available() -> bool:
+    """True when the CUDA 12 runtime CTranslate2 needs can actually load."""
+    ensure_cuda_dll_dirs()
+    if os.name != "nt":
+        return True
+    try:
+        from ctypes import WinDLL
+
+        WinDLL("cublas64_12.dll")
+        return True
+    except OSError:
+        return False
+
+
+def is_cuda_library_error(exc: BaseException) -> bool:
+    text = str(exc).lower()
+    return any(
+        token in text
+        for token in ("cublas", "cublas64", "cudnn", "cudnn64", "nvcuda", "cuda runtime")
+    )
+
+
 @lru_cache(maxsize=1)
 def detect_whisper_runtime() -> WhisperRuntime:
     """
-    Auto-select CUDA when a GPU is visible to CTranslate2.
+    Auto-select CUDA when a GPU is visible to CTranslate2 and cuBLAS can load.
     Override with SERMON_WHISPER_DEVICE=cpu|cuda and SERMON_WHISPER_COMPUTE_TYPE.
     """
     requested = _env_device()
     preferred_compute = _env_compute_type()
+    ensure_cuda_dll_dirs()
 
     try:
         import ctranslate2
@@ -78,20 +146,19 @@ def detect_whisper_runtime() -> WhisperRuntime:
         except Exception:
             cuda_count = 0
 
-    if requested == "cuda" or (requested == "auto" and cuda_count > 0):
-        if cuda_count > 0:
-            try:
-                supported = set(ctranslate2.get_supported_compute_types("cuda"))
-            except Exception:
-                supported = {"float32"}
-            return WhisperRuntime(
-                device="cuda",
-                compute_type=_pick_compute(preferred_compute, supported, CUDA_COMPUTE_PREFERENCE),
-                gpu_name=_gpu_name(),
-            )
-        if requested == "cuda":
-            # User asked for GPU but none is usable.
-            pass
+    use_cuda = requested != "cpu" and cuda_count > 0 and (
+        requested == "cuda" or cuda_libraries_available()
+    )
+    if use_cuda:
+        try:
+            supported = set(ctranslate2.get_supported_compute_types("cuda"))
+        except Exception:
+            supported = {"float32"}
+        return WhisperRuntime(
+            device="cuda",
+            compute_type=_pick_compute(preferred_compute, supported, CUDA_COMPUTE_PREFERENCE),
+            gpu_name=_gpu_name(),
+        )
 
     try:
         supported = set(ctranslate2.get_supported_compute_types("cpu"))

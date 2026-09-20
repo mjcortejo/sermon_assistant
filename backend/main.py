@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from backend.api import chat, media, notes, projects
 from backend.core.config import ensure_data_dirs
-from backend.core.hardware import detect_whisper_runtime
+from backend.core.hardware import detect_whisper_runtime, ensure_cuda_dll_dirs
 from backend.db.session import init_db
 from backend.services.llm import model_status as llm_status
 
@@ -14,6 +14,7 @@ from backend.services.llm import model_status as llm_status
 async def lifespan(_app: FastAPI):
     ensure_data_dirs()
     init_db()
+    ensure_cuda_dll_dirs()
     yield
 
 
