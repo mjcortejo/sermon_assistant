@@ -1,7 +1,10 @@
 import asyncio
+import queue
 import shutil
+import threading
+import time
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Callable, Iterator, Optional
 
 import yt_dlp
 from yt_dlp.utils import DownloadError
@@ -87,7 +90,37 @@ def get_video_info(url: str) -> dict[str, Any]:
     return _video_info_from_dict(info)
 
 
-def download_video(url: str, output_name: Optional[str] = None) -> dict[str, Any]:
+def _progress_from_ydl(d: dict[str, Any]) -> dict[str, Any]:
+    status = d.get("status")
+    if status == "downloading":
+        total = d.get("total_bytes") or d.get("total_bytes_estimate")
+        downloaded = d.get("downloaded_bytes") or 0
+        percent = None
+        if total:
+            percent = min(100.0, float(downloaded) * 100.0 / float(total))
+        elif d.get("fragment_count"):
+            percent = min(100.0, float(d.get("fragment_index") or 0) * 100.0 / float(d["fragment_count"]))
+        filename = Path(str(d.get("filename") or "")).name or None
+        return {
+            "phase": "downloading",
+            "percent": percent,
+            "downloaded_bytes": downloaded,
+            "total_bytes": total,
+            "speed": d.get("speed"),
+            "eta": d.get("eta"),
+            "filename": filename,
+            "message": "Downloading…",
+        }
+    if status == "finished":
+        return {"phase": "processing", "percent": 100.0, "message": "Preparing the file…"}
+    return {"phase": status or "downloading", "message": str(status or "Working…")}
+
+
+def download_video(
+    url: str,
+    output_name: Optional[str] = None,
+    on_progress: Optional[Callable[[dict[str, Any]], None]] = None,
+) -> dict[str, Any]:
     """
     Download a YouTube or public Facebook (Live) URL with yt-dlp.
     Files land in data/media/downloads/ as a merged MP4 when possible.
@@ -103,16 +136,39 @@ def download_video(url: str, output_name: Optional[str] = None) -> dict[str, Any
     else:
         template = str(DOWNLOADS_DIR / "%(id)s.%(ext)s")
 
+    last_emit = 0.0
+
+    def progress_hook(d: dict[str, Any]) -> None:
+        nonlocal last_emit
+        if on_progress is None:
+            return
+        payload = _progress_from_ydl(d)
+        now = time.monotonic()
+        if payload.get("phase") == "downloading" and now - last_emit < 0.2:
+            return
+        last_emit = now
+        on_progress(payload)
+
+    def postprocessor_hook(d: dict[str, Any]) -> None:
+        if on_progress is None:
+            return
+        name = str(d.get("postprocessor") or "processor")
+        if d.get("status") == "started":
+            on_progress({"phase": "merging", "percent": 100.0, "message": f"{name}…"})
+
     ydl_opts = {
         **_base_opts(),
         "format": YDL_FORMAT,
         "merge_output_format": "mp4",
         "outtmpl": template,
         "restrictfilenames": True,
-        "quiet": False,
+        "progress_hooks": [progress_hook],
+        "postprocessor_hooks": [postprocessor_hook],
     }
 
     try:
+        if on_progress:
+            on_progress({"phase": "resolving", "percent": 0.0, "message": "Looking up the video…"})
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=True)
             file_path = _resolve_downloaded_path(ydl, info)
@@ -120,6 +176,37 @@ def download_video(url: str, output_name: Optional[str] = None) -> dict[str, Any
         raise ValueError(f"Download failed: {exc}") from exc
 
     return {"file_path": file_path, "info": _video_info_from_dict(info)}
+
+
+def iter_download_events(url: str, output_name: Optional[str] = None) -> Iterator[dict[str, Any]]:
+    """Yield progress events, then a done payload with the saved file path."""
+    events: queue.Queue[dict[str, Any] | None] = queue.Queue()
+
+    def on_progress(payload: dict[str, Any]) -> None:
+        events.put({"type": "progress", "data": payload})
+
+    def worker() -> None:
+        try:
+            result = download_video(url, output_name, on_progress=on_progress)
+            events.put(
+                {
+                    "type": "done",
+                    "data": {"file_path": result["file_path"], "info": result.get("info")},
+                }
+            )
+        except Exception as exc:
+            events.put({"type": "error", "data": {"detail": str(exc)}})
+        finally:
+            events.put(None)
+
+    thread = threading.Thread(target=worker, daemon=True)
+    thread.start()
+    while True:
+        item = events.get()
+        if item is None:
+            break
+        yield item
+    thread.join(timeout=1)
 
 
 def ingest_local_file(source_path: str, output_name: Optional[str] = None) -> str:
